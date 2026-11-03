@@ -1,0 +1,312 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "HT01 EcoMarket network and private catalog foundation. No EC2 or RDS instances. IAM read-only group is initially empty.",
+  "Resources": {
+    "Vpc": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": "10.20.0.0/16",
+        "EnableDnsSupport": true,
+        "EnableDnsHostnames": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          },
+          {
+            "Key": "Name",
+            "Value": "ecomarket-ht01-vpc"
+          }
+        ]
+      }
+    },
+    "IGW": {
+      "Type": "AWS::EC2::InternetGateway",
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          }
+        ]
+      }
+    },
+    "AttachIGW": {
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "InternetGatewayId": {
+          "Ref": "IGW"
+        }
+      }
+    },
+    "PublicRoutes": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          }
+        ]
+      }
+    },
+    "InternetRoute": {
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "PublicRoutes"
+        },
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "IGW"
+        }
+      },
+      "DependsOn": "AttachIGW"
+    },
+    "PublicA": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "AvailabilityZone": "us-east-1a",
+        "CidrBlock": "10.20.1.0/24",
+        "MapPublicIpOnLaunch": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          },
+          {
+            "Key": "Name",
+            "Value": "ecomarket-ht01-publica"
+          }
+        ]
+      }
+    },
+    "PublicARoute": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "PublicA"
+        },
+        "RouteTableId": {
+          "Ref": "PublicRoutes"
+        }
+      }
+    },
+    "PrivateA": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "AvailabilityZone": "us-east-1a",
+        "CidrBlock": "10.20.2.0/24",
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          },
+          {
+            "Key": "Name",
+            "Value": "ecomarket-ht01-privatea"
+          }
+        ]
+      }
+    },
+    "PublicB": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "AvailabilityZone": "us-east-1b",
+        "CidrBlock": "10.20.3.0/24",
+        "MapPublicIpOnLaunch": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          },
+          {
+            "Key": "Name",
+            "Value": "ecomarket-ht01-publicb"
+          }
+        ]
+      }
+    },
+    "PublicBRoute": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "PublicB"
+        },
+        "RouteTableId": {
+          "Ref": "PublicRoutes"
+        }
+      }
+    },
+    "PrivateB": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "AvailabilityZone": "us-east-1b",
+        "CidrBlock": "10.20.4.0/24",
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          },
+          {
+            "Key": "Name",
+            "Value": "ecomarket-ht01-privateb"
+          }
+        ]
+      }
+    },
+    "WebSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "GroupDescription": "EcoMarket planned web HTTP HTTPS",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          }
+        ]
+      }
+    },
+    "DbSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "GroupDescription": "MySQL only from EcoMarket web group",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 3306,
+            "ToPort": 3306,
+            "SourceSecurityGroupId": {
+              "Ref": "WebSG"
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          }
+        ]
+      }
+    },
+    "Catalog": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": "ecostore-files-135425822911",
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "IgnorePublicAcls": true,
+          "BlockPublicPolicy": true,
+          "RestrictPublicBuckets": true
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          }
+        ]
+      },
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "Readers": {
+      "Type": "AWS::IAM::Group",
+      "Properties": {
+        "GroupName": "EcoMarketCatalogReaders",
+        "Policies": [
+          {
+            "PolicyName": "ReadOnlyCatalog",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${Catalog}/catalog/*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "VpcId": {
+      "Value": {
+        "Ref": "Vpc"
+      }
+    },
+    "CatalogBucket": {
+      "Value": {
+        "Ref": "Catalog"
+      }
+    },
+    "WebSecurityGroup": {
+      "Value": {
+        "Ref": "WebSG"
+      }
+    },
+    "DatabaseSecurityGroup": {
+      "Value": {
+        "Ref": "DbSG"
+      }
+    }
+  }
+}

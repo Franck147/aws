@@ -1,0 +1,165 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "HTTPS de laboratorio usando dominios CloudFront. El origen ALB conserva HTTP; no acredita TLS hasta el origen.",
+  "Parameters": {
+    "EduCodeOrigin": {
+      "Type": "String"
+    },
+    "SeguroYaOrigin": {
+      "Type": "String"
+    },
+    "OriginPolicy": {
+      "Type": "String"
+    }
+  },
+  "Resources": {
+    "ClientIpFunction": {
+      "Type": "AWS::CloudFront::Function",
+      "Properties": {
+        "Name": "practicas-ht-client-ip",
+        "AutoPublish": true,
+        "FunctionConfig": {
+          "Comment": "Conserva IP real para una regla adicional de WAF regional",
+          "Runtime": "cloudfront-js-2.0"
+        },
+        "FunctionCode": "function handler(event) { var request = event.request; request.headers['x-lab-client-ip'] = {value: event.viewer.ip}; return request; }"
+      }
+    },
+    "EduCodeHTTPS": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Enabled": true,
+          "Comment": "EduCode laboratorio HTTPS; sin cache; origen HTTP",
+          "PriceClass": "PriceClass_100",
+          "HttpVersion": "http2",
+          "IPV6Enabled": true,
+          "Origins": [
+            {
+              "Id": "application",
+              "DomainName": {
+                "Ref": "EduCodeOrigin"
+              },
+              "CustomOriginConfig": {
+                "HTTPPort": 80,
+                "HTTPSPort": 443,
+                "OriginProtocolPolicy": "http-only"
+              }
+            }
+          ],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "application",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": [
+              "GET",
+              "HEAD",
+              "OPTIONS"
+            ],
+            "CachedMethods": [
+              "GET",
+              "HEAD"
+            ],
+            "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+            "OriginRequestPolicyId": {
+              "Ref": "OriginPolicy"
+            },
+            "Compress": true,
+            "FunctionAssociations": [
+              {
+                "EventType": "viewer-request",
+                "FunctionARN": {
+                  "Fn::GetAtt": [
+                    "ClientIpFunction",
+                    "FunctionARN"
+                  ]
+                }
+              }
+            ]
+          },
+          "ViewerCertificate": {
+            "CloudFrontDefaultCertificate": true
+          }
+        }
+      }
+    },
+    "SeguroYaHTTPS": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Enabled": true,
+          "Comment": "SeguroYa laboratorio HTTPS; sin cache; origen HTTP",
+          "PriceClass": "PriceClass_100",
+          "HttpVersion": "http2",
+          "IPV6Enabled": true,
+          "Origins": [
+            {
+              "Id": "application",
+              "DomainName": {
+                "Ref": "SeguroYaOrigin"
+              },
+              "CustomOriginConfig": {
+                "HTTPPort": 80,
+                "HTTPSPort": 443,
+                "OriginProtocolPolicy": "http-only"
+              }
+            }
+          ],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "application",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": [
+              "GET",
+              "HEAD",
+              "OPTIONS"
+            ],
+            "CachedMethods": [
+              "GET",
+              "HEAD"
+            ],
+            "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+            "OriginRequestPolicyId": {
+              "Ref": "OriginPolicy"
+            },
+            "Compress": true,
+            "FunctionAssociations": [
+              {
+                "EventType": "viewer-request",
+                "FunctionARN": {
+                  "Fn::GetAtt": [
+                    "ClientIpFunction",
+                    "FunctionARN"
+                  ]
+                }
+              }
+            ]
+          },
+          "ViewerCertificate": {
+            "CloudFrontDefaultCertificate": true
+          }
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "EduCodeURL": {
+      "Value": {
+        "Fn::Sub": "https://${EduCodeHTTPS.DomainName}"
+      }
+    },
+    "EduCodeDistributionId": {
+      "Value": {
+        "Ref": "EduCodeHTTPS"
+      }
+    },
+    "SeguroYaURL": {
+      "Value": {
+        "Fn::Sub": "https://${SeguroYaHTTPS.DomainName}"
+      }
+    },
+    "SeguroYaDistributionId": {
+      "Value": {
+        "Ref": "SeguroYaHTTPS"
+      }
+    }
+  }
+}

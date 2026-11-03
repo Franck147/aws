@@ -1,0 +1,1097 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Laboratorio HT03/HT04/HT05. Public ALB, EC2 Auto Scaling, optional private RDS and ECS, monitoring and optional WAF. Requires explicit IAM/network approval before execution.",
+  "Parameters": {
+    "Project": {
+      "Type": "String",
+      "AllowedPattern": "[a-z][a-z0-9-]{2,30}"
+    },
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id"
+    },
+    "PublicSubnets": {
+      "Type": "List<AWS::EC2::Subnet::Id>"
+    },
+    "PrivateSubnets": {
+      "Type": "List<AWS::EC2::Subnet::Id>"
+    },
+    "AppSubnets": {
+      "Type": "List<AWS::EC2::Subnet::Id>"
+    },
+    "ArtifactBucket": {
+      "Type": "String"
+    },
+    "UploadBucket": {
+      "Type": "String"
+    },
+    "ContainerImage": {
+      "Type": "String"
+    },
+    "UbuntuAmi": {
+      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
+      "Default": "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+    },
+    "EnableDatabase": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": [
+        "true",
+        "false"
+      ]
+    },
+    "EnableContainers": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": [
+        "true",
+        "false"
+      ]
+    },
+    "EnableWaf": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": [
+        "true",
+        "false"
+      ]
+    }
+  },
+  "Conditions": {
+    "WithDatabase": {
+      "Fn::Equals": [
+        {
+          "Ref": "EnableDatabase"
+        },
+        "true"
+      ]
+    },
+    "WithContainers": {
+      "Fn::Equals": [
+        {
+          "Ref": "EnableContainers"
+        },
+        "true"
+      ]
+    },
+    "WithWaf": {
+      "Fn::Equals": [
+        {
+          "Ref": "EnableWaf"
+        },
+        "true"
+      ]
+    }
+  },
+  "Resources": {
+    "AlbSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Public HTTP entry to laboratory ALB",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "Project"
+            }
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "practicas-ht01-ht05"
+          }
+        ]
+      }
+    },
+    "AppSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Application only from ALB; no inbound SSH",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 3000,
+            "ToPort": 3000,
+            "SourceSecurityGroupId": {
+              "Ref": "AlbSG"
+            }
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "SourceSecurityGroupId": {
+              "Ref": "AlbSG"
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "Project"
+            }
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "practicas-ht01-ht05"
+          }
+        ]
+      }
+    },
+    "DbSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "MySQL only from application security group",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 3306,
+            "ToPort": 3306,
+            "SourceSecurityGroupId": {
+              "Ref": "AppSG"
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "Project"
+            }
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "practicas-ht01-ht05"
+          }
+        ]
+      },
+      "Condition": "WithDatabase"
+    },
+    "DbSubnetGroup": {
+      "Type": "AWS::RDS::DBSubnetGroup",
+      "Properties": {
+        "DBSubnetGroupDescription": "Private database subnets",
+        "SubnetIds": {
+          "Ref": "PrivateSubnets"
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "Project"
+            }
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "practicas-ht01-ht05"
+          }
+        ]
+      },
+      "Condition": "WithDatabase"
+    },
+    "Database": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "DBInstanceIdentifier": {
+          "Fn::Sub": "${Project}-db"
+        },
+        "Engine": "mysql",
+        "EngineVersion": "8.4.10",
+        "DBInstanceClass": "db.t3.micro",
+        "AllocatedStorage": "20",
+        "StorageType": "gp3",
+        "StorageEncrypted": true,
+        "DBName": "educode",
+        "MasterUsername": "labadmin",
+        "ManageMasterUserPassword": true,
+        "DBSubnetGroupName": {
+          "Ref": "DbSubnetGroup"
+        },
+        "VPCSecurityGroups": [
+          {
+            "Ref": "DbSG"
+          }
+        ],
+        "PubliclyAccessible": false,
+        "MultiAZ": false,
+        "BackupRetentionPeriod": 1,
+        "DeletionProtection": false,
+        "AutoMinorVersionUpgrade": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "Project"
+            }
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "practicas-ht01-ht05"
+          }
+        ]
+      },
+      "Condition": "WithDatabase",
+      "DeletionPolicy": "Snapshot",
+      "UpdateReplacePolicy": "Snapshot"
+    },
+    "Ec2Role": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "lab-scoped",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:PutObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${UploadBucket}/practicas/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucket}/laboratorio/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudwatch:PutMetricData"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "cloudwatch:namespace": "CWAgent"
+                    }
+                  }
+                },
+                {
+                  "Fn::If": [
+                    "WithDatabase",
+                    {
+                      "Effect": "Allow",
+                      "Action": [
+                        "secretsmanager:GetSecretValue"
+                      ],
+                      "Resource": {
+                        "Fn::GetAtt": [
+                          "Database",
+                          "MasterUserSecret.SecretArn"
+                        ]
+                      }
+                    },
+                    {
+                      "Ref": "AWS::NoValue"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+          }
+        ]
+      }
+    },
+    "Profile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "Ec2Role"
+          }
+        ]
+      }
+    },
+    "Logs": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/laboratorio/${Project}"
+        },
+        "RetentionInDays": 7
+      }
+    },
+    "TaskRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "lab-scoped",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:PutObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${UploadBucket}/practicas/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucket}/laboratorio/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudwatch:PutMetricData"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "cloudwatch:namespace": "CWAgent"
+                    }
+                  }
+                },
+                {
+                  "Fn::If": [
+                    "WithDatabase",
+                    {
+                      "Effect": "Allow",
+                      "Action": [
+                        "secretsmanager:GetSecretValue"
+                      ],
+                      "Resource": {
+                        "Fn::GetAtt": [
+                          "Database",
+                          "MasterUserSecret.SecretArn"
+                        ]
+                      }
+                    },
+                    {
+                      "Ref": "AWS::NoValue"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "Condition": "WithContainers"
+    },
+    "ExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "lab-scoped",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecr:GetAuthorizationToken"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/educode-ht04"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "Logs",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "Condition": "WithContainers"
+    },
+    "ALB": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "Properties": {
+        "Scheme": "internet-facing",
+        "Type": "application",
+        "Subnets": {
+          "Ref": "PublicSubnets"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "AlbSG"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "Project"
+            }
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "practicas-ht01-ht05"
+          }
+        ]
+      }
+    },
+    "Ec2Target": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "Protocol": "HTTP",
+        "Port": 80,
+        "TargetType": "instance",
+        "HealthCheckPath": "/health",
+        "Matcher": {
+          "HttpCode": "200"
+        },
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30"
+          }
+        ]
+      }
+    },
+    "EcsTarget": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "Protocol": "HTTP",
+        "Port": 3000,
+        "TargetType": "ip",
+        "HealthCheckPath": "/health",
+        "Matcher": {
+          "HttpCode": "200"
+        },
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30"
+          }
+        ]
+      }
+    },
+    "Listener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "LoadBalancerArn": {
+          "Ref": "ALB"
+        },
+        "Protocol": "HTTP",
+        "Port": 80,
+        "DefaultActions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "Ec2Target"
+            }
+          }
+        ]
+      }
+    },
+    "ContainerRoute": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Properties": {
+        "ListenerArn": {
+          "Ref": "Listener"
+        },
+        "Priority": 10,
+        "Conditions": [
+          {
+            "Field": "path-pattern",
+            "Values": [
+              "/containers/*"
+            ]
+          }
+        ],
+        "Actions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "EcsTarget"
+            }
+          }
+        ]
+      }
+    },
+    "Template": {
+      "Type": "AWS::EC2::LaunchTemplate",
+      "Properties": {
+        "LaunchTemplateData": {
+          "ImageId": {
+            "Ref": "UbuntuAmi"
+          },
+          "InstanceType": "t3.micro",
+          "IamInstanceProfile": {
+            "Arn": {
+              "Fn::GetAtt": [
+                "Profile",
+                "Arn"
+              ]
+            }
+          },
+          "SecurityGroupIds": [
+            {
+              "Ref": "AppSG"
+            }
+          ],
+          "MetadataOptions": {
+            "HttpTokens": "required",
+            "HttpPutResponseHopLimit": 2
+          },
+          "Monitoring": {
+            "Enabled": true
+          },
+          "BlockDeviceMappings": [
+            {
+              "DeviceName": "/dev/sda1",
+              "Ebs": {
+                "VolumeSize": 8,
+                "VolumeType": "gp3",
+                "Encrypted": true,
+                "DeleteOnTermination": true
+              }
+            }
+          ],
+          "UserData": {
+            "Fn::Base64": {
+              "Fn::Sub": [
+                "#!/bin/bash\nset -euxo pipefail\nexport DEBIAN_FRONTEND=noninteractive\napt-get update\napt-get install -y nginx nodejs npm python3-boto3 ca-certificates curl\nmkdir -p /opt/practicas/app\npython3 - <<'PY'\nimport boto3,tarfile,io,os\ns=boto3.client('s3',region_name='us-east-1')\ndata=s.get_object(Bucket='${ArtifactBucket}',Key='laboratorio/app.tar.gz')['Body'].read()\nwith tarfile.open(fileobj=io.BytesIO(data)) as t:\n for m in t.getmembers():\n  if m.name.startswith('/') or '..' in m.name.split('/'): raise ValueError('unsafe archive')\n t.extractall('/opt/practicas/app')\nPY\ncd /opt/practicas/app\ncurl -fsS https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem -o rds-ca.pem\nnpm install --omit=dev\ncat >/etc/practicas.env <<'ENV'\nAWS_REGION=us-east-1\nPROJECT=${Project}\nUPLOAD_BUCKET=${UploadBucket}\nDB_HOST=${DatabaseHost}\nDB_SECRET_ARN=${DatabaseSecret}\nENV\ncat >/etc/systemd/system/practicas-app.service <<'UNIT'\n[Unit]\nAfter=network-online.target\nWants=network-online.target\n[Service]\nWorkingDirectory=/opt/practicas/app\nEnvironmentFile=/etc/practicas.env\nExecStart=/usr/bin/node server.mjs\nRestart=always\nUser=www-data\nNoNewPrivileges=true\nPrivateTmp=true\n[Install]\nWantedBy=multi-user.target\nUNIT\ncat >/etc/nginx/sites-available/default <<'NGINX'\nserver { listen 80 default_server; location / { proxy_pass http://127.0.0.1:3000; proxy_set_header Host $host; } }\nNGINX\nsystemctl daemon-reload\nsystemctl enable --now practicas-app\nsystemctl restart nginx\ncurl -fsS https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb -o /tmp/cloudwatch-agent.deb\ndpkg -i /tmp/cloudwatch-agent.deb\ncat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CW'\n{\"agent\":{\"metrics_collection_interval\":60},\"metrics\":{\"namespace\":\"CWAgent\",\"append_dimensions\":{\"InstanceId\":\"${!aws:InstanceId}\"},\"metrics_collected\":{\"mem\":{\"measurement\":[\"mem_used_percent\"]},\"disk\":{\"measurement\":[\"used_percent\"],\"resources\":[\"/\"]}}}}\nCW\n/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s\n",
+                {
+                  "DatabaseHost": {
+                    "Fn::If": [
+                      "WithDatabase",
+                      {
+                        "Fn::GetAtt": [
+                          "Database",
+                          "Endpoint.Address"
+                        ]
+                      },
+                      ""
+                    ]
+                  },
+                  "DatabaseSecret": {
+                    "Fn::If": [
+                      "WithDatabase",
+                      {
+                        "Fn::GetAtt": [
+                          "Database",
+                          "MasterUserSecret.SecretArn"
+                        ]
+                      },
+                      ""
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "TagSpecifications": [
+            {
+              "ResourceType": "instance",
+              "Tags": [
+                {
+                  "Key": "Project",
+                  "Value": {
+                    "Ref": "Project"
+                  }
+                },
+                {
+                  "Key": "ManagedBy",
+                  "Value": "practicas-ht01-ht05"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "AutoScaling": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "MinSize": "1",
+        "MaxSize": "4",
+        "DesiredCapacity": "1",
+        "VPCZoneIdentifier": {
+          "Ref": "AppSubnets"
+        },
+        "LaunchTemplate": {
+          "LaunchTemplateId": {
+            "Ref": "Template"
+          },
+          "Version": {
+            "Fn::GetAtt": [
+              "Template",
+              "LatestVersionNumber"
+            ]
+          }
+        },
+        "TargetGroupARNs": [
+          {
+            "Ref": "Ec2Target"
+          }
+        ],
+        "HealthCheckType": "ELB",
+        "HealthCheckGracePeriod": 900,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": {
+              "Ref": "Project"
+            },
+            "PropagateAtLaunch": true
+          }
+        ]
+      }
+    },
+    "CpuScaling": {
+      "Type": "AWS::AutoScaling::ScalingPolicy",
+      "Properties": {
+        "AutoScalingGroupName": {
+          "Ref": "AutoScaling"
+        },
+        "PolicyType": "TargetTrackingScaling",
+        "TargetTrackingConfiguration": {
+          "TargetValue": 60,
+          "PredefinedMetricSpecification": {
+            "PredefinedMetricType": "ASGAverageCPUUtilization"
+          }
+        }
+      }
+    },
+    "Cluster": {
+      "Type": "AWS::ECS::Cluster",
+      "Properties": {
+        "ClusterName": {
+          "Fn::Sub": "${Project}-cluster"
+        },
+        "ClusterSettings": [
+          {
+            "Name": "containerInsights",
+            "Value": "enabled"
+          }
+        ]
+      },
+      "Condition": "WithContainers"
+    },
+    "Task": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "Family": {
+          "Fn::Sub": "${Project}-task"
+        },
+        "Cpu": "256",
+        "Memory": "512",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE"
+        ],
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "ExecutionRole",
+            "Arn"
+          ]
+        },
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "TaskRole",
+            "Arn"
+          ]
+        },
+        "ContainerDefinitions": [
+          {
+            "Name": "app",
+            "Image": {
+              "Ref": "ContainerImage"
+            },
+            "Essential": true,
+            "PortMappings": [
+              {
+                "ContainerPort": 3000
+              }
+            ],
+            "Environment": [
+              {
+                "Name": "AWS_REGION",
+                "Value": {
+                  "Ref": "AWS::Region"
+                }
+              },
+              {
+                "Name": "PROJECT",
+                "Value": {
+                  "Ref": "Project"
+                }
+              },
+              {
+                "Name": "UPLOAD_BUCKET",
+                "Value": {
+                  "Ref": "UploadBucket"
+                }
+              },
+              {
+                "Name": "DB_HOST",
+                "Value": {
+                  "Fn::If": [
+                    "WithDatabase",
+                    {
+                      "Fn::GetAtt": [
+                        "Database",
+                        "Endpoint.Address"
+                      ]
+                    },
+                    ""
+                  ]
+                }
+              },
+              {
+                "Name": "DB_SECRET_ARN",
+                "Value": {
+                  "Fn::If": [
+                    "WithDatabase",
+                    {
+                      "Fn::GetAtt": [
+                        "Database",
+                        "MasterUserSecret.SecretArn"
+                      ]
+                    },
+                    ""
+                  ]
+                }
+              }
+            ],
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "Logs"
+                },
+                "awslogs-region": {
+                  "Ref": "AWS::Region"
+                },
+                "awslogs-stream-prefix": "app"
+              }
+            }
+          }
+        ]
+      },
+      "Condition": "WithContainers"
+    },
+    "Service": {
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "Cluster": {
+          "Ref": "Cluster"
+        },
+        "TaskDefinition": {
+          "Ref": "Task"
+        },
+        "DesiredCount": 1,
+        "LaunchType": "FARGATE",
+        "HealthCheckGracePeriodSeconds": 120,
+        "DeploymentConfiguration": {
+          "DeploymentCircuitBreaker": {
+            "Enable": true,
+            "Rollback": true
+          },
+          "MaximumPercent": 200,
+          "MinimumHealthyPercent": 100
+        },
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "ENABLED",
+            "Subnets": {
+              "Ref": "AppSubnets"
+            },
+            "SecurityGroups": [
+              {
+                "Ref": "AppSG"
+              }
+            ]
+          }
+        },
+        "LoadBalancers": [
+          {
+            "ContainerName": "app",
+            "ContainerPort": 3000,
+            "TargetGroupArn": {
+              "Ref": "EcsTarget"
+            }
+          }
+        ]
+      },
+      "Condition": "WithContainers",
+      "DependsOn": "ContainerRoute"
+    },
+    "Topic": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "TopicName": {
+          "Fn::Sub": "${Project}-alertas"
+        }
+      }
+    },
+    "CpuAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "CPU promedio ASG superior al 70% durante 5 minutos",
+        "Namespace": "AWS/EC2",
+        "MetricName": "CPUUtilization",
+        "Dimensions": [
+          {
+            "Name": "AutoScalingGroupName",
+            "Value": {
+              "Ref": "AutoScaling"
+            }
+          }
+        ],
+        "Statistic": "Average",
+        "Period": 300,
+        "EvaluationPeriods": 1,
+        "Threshold": 70,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "Topic"
+          }
+        ]
+      }
+    },
+    "Dashboard": {
+      "Type": "AWS::CloudWatch::Dashboard",
+      "Properties": {
+        "DashboardName": {
+          "Fn::Sub": "${Project}-operacion"
+        },
+        "DashboardBody": {
+          "Fn::Sub": "{\"widgets\": [{\"type\": \"metric\", \"x\": 0, \"y\": 0, \"width\": 12, \"height\": 6, \"properties\": {\"title\": \"CPU EC2\", \"region\": \"${AWS::Region}\", \"metrics\": [[\"AWS/EC2\", \"CPUUtilization\", \"AutoScalingGroupName\", \"${AutoScaling}\"]], \"period\": 300, \"stat\": \"Average\"}}, {\"type\": \"metric\", \"x\": 12, \"y\": 0, \"width\": 12, \"height\": 6, \"properties\": {\"title\": \"Almacenamiento S3 (actualizacion diaria)\", \"region\": \"${AWS::Region}\", \"metrics\": [[\"AWS/S3\", \"BucketSizeBytes\", \"BucketName\", \"${UploadBucket}\", \"StorageType\", \"StandardStorage\"]], \"period\": 86400, \"stat\": \"Average\"}}, {\"type\": \"metric\", \"x\": 0, \"y\": 6, \"width\": 24, \"height\": 6, \"properties\": {\"title\": \"Peticiones HTTP ALB\", \"region\": \"${AWS::Region}\", \"metrics\": [[\"AWS/ApplicationELB\", \"RequestCount\", \"LoadBalancer\", \"${ALB.LoadBalancerFullName}\"]], \"period\": 60, \"stat\": \"Sum\"}}, {\"type\": \"metric\", \"x\": 0, \"y\": 12, \"width\": 12, \"height\": 6, \"properties\": {\"title\": \"Memoria del laboratorio\", \"region\": \"${AWS::Region}\", \"metrics\": [[{\"expression\": \"SEARCH('{CWAgent,InstanceId} MetricName=\\\"mem_used_percent\\\"', 'Average', 60)\", \"id\": \"e1\"}]], \"period\": 60, \"stat\": \"Average\"}}, {\"type\": \"metric\", \"x\": 12, \"y\": 12, \"width\": 12, \"height\": 6, \"properties\": {\"title\": \"Disco del laboratorio\", \"region\": \"${AWS::Region}\", \"metrics\": [[{\"expression\": \"SEARCH('{CWAgent,InstanceId,path,device,fstype} MetricName=\\\"disk_used_percent\\\"', 'Average', 60)\", \"id\": \"e1\"}]], \"period\": 60, \"stat\": \"Average\"}}]}"
+        }
+      }
+    },
+    "WebACL": {
+      "Type": "AWS::WAFv2::WebACL",
+      "Properties": {
+        "Scope": "REGIONAL",
+        "DefaultAction": {
+          "Allow": {}
+        },
+        "VisibilityConfig": {
+          "SampledRequestsEnabled": true,
+          "CloudWatchMetricsEnabled": true,
+          "MetricName": "lab-waf"
+        },
+        "Rules": [
+          {
+            "Name": "SQLInjection",
+            "Priority": 1,
+            "OverrideAction": {
+              "None": {}
+            },
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "VendorName": "AWS",
+                "Name": "AWSManagedRulesSQLiRuleSet"
+              }
+            },
+            "VisibilityConfig": {
+              "SampledRequestsEnabled": true,
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sql-injection"
+            }
+          },
+          {
+            "Name": "RateLimit",
+            "Priority": 2,
+            "Action": {
+              "Block": {}
+            },
+            "Statement": {
+              "RateBasedStatement": {
+                "Limit": 100,
+                "AggregateKeyType": "IP",
+                "EvaluationWindowSec": 300
+              }
+            },
+            "VisibilityConfig": {
+              "SampledRequestsEnabled": true,
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "rate-limit"
+            }
+          },
+          {
+            "Name": "CloudFrontClientRateLimit",
+            "Priority": 3,
+            "Action": {
+              "Block": {}
+            },
+            "Statement": {
+              "RateBasedStatement": {
+                "Limit": 100,
+                "AggregateKeyType": "FORWARDED_IP",
+                "EvaluationWindowSec": 300,
+                "ForwardedIPConfig": {
+                  "HeaderName": "x-lab-client-ip",
+                  "FallbackBehavior": "MATCH"
+                }
+              }
+            },
+            "VisibilityConfig": {
+              "SampledRequestsEnabled": true,
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "cloudfront-client-rate-limit"
+            }
+          }
+        ]
+      },
+      "Condition": "WithWaf"
+    },
+    "WafAssociation": {
+      "Type": "AWS::WAFv2::WebACLAssociation",
+      "Properties": {
+        "ResourceArn": {
+          "Ref": "ALB"
+        },
+        "WebACLArn": {
+          "Fn::GetAtt": [
+            "WebACL",
+            "Arn"
+          ]
+        }
+      },
+      "Condition": "WithWaf"
+    }
+  },
+  "Outputs": {
+    "URL": {
+      "Value": {
+        "Fn::Sub": "http://${ALB.DNSName}"
+      }
+    },
+    "AutoScalingGroup": {
+      "Value": {
+        "Ref": "AutoScaling"
+      }
+    },
+    "LoadBalancerArn": {
+      "Value": {
+        "Ref": "ALB"
+      }
+    },
+    "AlertTopic": {
+      "Value": {
+        "Ref": "Topic"
+      }
+    },
+    "DatabaseHost": {
+      "Condition": "WithDatabase",
+      "Value": {
+        "Fn::GetAtt": [
+          "Database",
+          "Endpoint.Address"
+        ]
+      }
+    },
+    "DatabaseSecretArn": {
+      "Condition": "WithDatabase",
+      "Value": {
+        "Fn::GetAtt": [
+          "Database",
+          "MasterUserSecret.SecretArn"
+        ]
+      }
+    },
+    "Cluster": {
+      "Condition": "WithContainers",
+      "Value": {
+        "Ref": "Cluster"
+      }
+    }
+  }
+}

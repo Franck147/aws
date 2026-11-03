@@ -1,0 +1,14 @@
+stack_name = "educode-ht04-lab-v1"
+parameters = {
+  Project = "educode-ht04"
+  VpcId = "vpc-0f64569dde1fa939f"
+  PublicSubnets = "subnet-055345debe94cb262,subnet-0f328ff4f269b98f8"
+  AppSubnets = "subnet-04c4335c07e2a3835,subnet-0ba1f1fa0575de321"
+  PrivateSubnets = "subnet-00fed2ad26c16ed0f,subnet-05ff50eb8899aecb9"
+  ArtifactBucket = "educode-ht04-artifacts-135425822911"
+  UploadBucket = "datavision-uploads-135425822911"
+  ContainerImage = "135425822911.dkr.ecr.us-east-1.amazonaws.com/educode-ht04:lab-v1"
+  EnableDatabase = "true"
+  EnableContainers = "true"
+  EnableWaf = "false"
+}
