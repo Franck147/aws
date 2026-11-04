@@ -1,0 +1,7 @@
+node_modules/
+frontend/dist/
+*.tar.gz
+*.pem
+.env
+.terraform/
+*.tfstate*
