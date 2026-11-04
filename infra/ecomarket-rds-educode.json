@@ -1,0 +1,576 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "EcoMarket Angular and Node on EC2 with a dedicated schema on the private EduCode RDS",
+  "Parameters": {
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id"
+    },
+    "FrontendSubnet": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "BackendSubnet": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "FrontendSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup::Id"
+    },
+    "CatalogBucket": {
+      "Type": "String"
+    },
+    "ArtifactPrefix": {
+      "Type": "String",
+      "Default": "catalog/deploy/shared-v1"
+    },
+    "InstanceType": {
+      "Type": "String",
+      "Default": "t3.small",
+      "AllowedValues": [
+        "t3.micro",
+        "t3.small"
+      ]
+    },
+    "NodeVersion": {
+      "Type": "String",
+      "AllowedPattern": "v24\\.[0-9]+\\.[0-9]+"
+    },
+    "UbuntuAmi": {
+      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
+      "Default": "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+    },
+    "OriginPolicy": {
+      "Type": "String"
+    },
+    "AlertTopic": {
+      "Type": "String"
+    }
+  },
+  "Resources": {
+    "BackendSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "GroupDescription": "EcoMarket backend only from frontend",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 3000,
+            "ToPort": 3000,
+            "SourceSecurityGroupId": {
+              "Ref": "FrontendSecurityGroup"
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          }
+        ]
+      }
+    },
+    "FrontendRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+          }
+        ],
+        "Policies": [
+          {
+            "PolicyName": "EcoMarketScopedRuntime",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:s3:::${CatalogBucket}/${ArtifactPrefix}/frontend.tar.gz"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudwatch:PutMetricData"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "cloudwatch:namespace": "EcoMarket/HT01"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          }
+        ]
+      }
+    },
+    "FrontendProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "FrontendRole"
+          }
+        ]
+      }
+    },
+    "BackendRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+          }
+        ],
+        "Policies": [
+          {
+            "PolicyName": "EcoMarketScopedRuntime",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:s3:::${CatalogBucket}/${ArtifactPrefix}/backend.tar.gz"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudwatch:PutMetricData"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "cloudwatch:namespace": "EcoMarket/HT01"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${CatalogBucket}/catalog/products/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": {
+                    "Ref": "CatalogSecret"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          }
+        ]
+      }
+    },
+    "BackendProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "BackendRole"
+          }
+        ]
+      }
+    },
+    "Backend": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": {
+          "Ref": "UbuntuAmi"
+        },
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "IamInstanceProfile": {
+          "Ref": "BackendProfile"
+        },
+        "NetworkInterfaces": [
+          {
+            "DeviceIndex": "0",
+            "AssociatePublicIpAddress": true,
+            "SubnetId": {
+              "Ref": "BackendSubnet"
+            },
+            "GroupSet": [
+              {
+                "Ref": "BackendSG"
+              }
+            ]
+          }
+        ],
+        "Monitoring": true,
+        "MetadataOptions": {
+          "HttpTokens": "required",
+          "HttpPutResponseHopLimit": 1
+        },
+        "CreditSpecification": {
+          "CPUCredits": "standard"
+        },
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "VolumeSize": 10,
+              "VolumeType": "gp3",
+              "Encrypted": true,
+              "DeleteOnTermination": true
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          },
+          {
+            "Key": "Name",
+            "Value": "ecomarket-ht01-backend"
+          }
+        ],
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Sub": "#!/bin/bash\nset -euo pipefail\nexport DEBIAN_FRONTEND=noninteractive\nmkdir -p /opt/ecomarket\napt-get update -qq\napt-get -o DPkg::Lock::Timeout=180 install -y python3-boto3 curl ca-certificates xz-utils \npython3 - <<'PY'\nimport boto3\nboto3.client('s3',region_name='${AWS::Region}').download_file('${CatalogBucket}','${ArtifactPrefix}/backend.tar.gz','/tmp/ecomarket.tar.gz')\nPY\ncurl -fsSL --retry 3 https://nodejs.org/dist/${NodeVersion}/node-${NodeVersion}-linux-x64.tar.xz -o /tmp/node.tar.xz\ncurl -fsSL --retry 3 https://nodejs.org/dist/${NodeVersion}/SHASUMS256.txt -o /tmp/node-shasums\npython3 - <<'PY'\nimport hashlib,pathlib\nfilename='node-${NodeVersion}-linux-x64.tar.xz'\nexpected=next(line.split()[0] for line in pathlib.Path('/tmp/node-shasums').read_text().splitlines() if line.split()[-1]==filename)\nassert hashlib.sha256(pathlib.Path('/tmp/node.tar.xz').read_bytes()).hexdigest()==expected\nPY\ntar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1\nmkdir -p /opt/ecomarket/app\ntar -xzf /tmp/ecomarket.tar.gz -C /opt/ecomarket/app\ncd /opt/ecomarket/app\nnpm ci --omit=dev --no-audit --no-fund\ncurl -fsSL --retry 3 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem -o rds-ca.pem\nid ecomarket >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin ecomarket\ncat > /etc/ecomarket.env <<'ENV'\nAWS_REGION=${AWS::Region}\nDB_HOST=educode-ht04-db.cqrucw0qg3g4.us-east-1.rds.amazonaws.com\nDB_SECRET_ARN=${CatalogSecret}\nDB_READ_ONLY=1\nCATALOG_BUCKET=${CatalogBucket}\nPORT=3000\nENV\nchmod 600 /etc/ecomarket.env\ncat > /etc/systemd/system/ecomarket-backend.service <<'UNIT'\n[Unit]\nDescription=EcoMarket Node backend\nAfter=network-online.target\nWants=network-online.target\n[Service]\nUser=ecomarket\nGroup=ecomarket\nWorkingDirectory=/opt/ecomarket/app\nEnvironmentFile=/etc/ecomarket.env\nExecStart=/usr/local/bin/node /opt/ecomarket/app/server.mjs\nRestart=on-failure\nRestartSec=10\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\n[Install]\nWantedBy=multi-user.target\nUNIT\nsystemctl daemon-reload\nsystemctl enable --now ecomarket-backend\ncurl -fsSL --retry 3 https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb -o /tmp/cloudwatch-agent.deb\ndpkg -i /tmp/cloudwatch-agent.deb\ncat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'\n{\"metrics\":{\"namespace\":\"EcoMarket/HT01\",\"append_dimensions\":{\"InstanceId\":\"${!aws:InstanceId}\"},\"metrics_collected\":{\"mem\":{\"measurement\":[\"mem_used_percent\"],\"metrics_collection_interval\":60},\"disk\":{\"measurement\":[\"used_percent\"],\"resources\":[\"/\"],\"metrics_collection_interval\":60}}}}\nJSON\n/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json\n"
+          }
+        }
+      }
+    },
+    "BackendCpuAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "EcoMarket CPU over 70 percent for 5 minutes",
+        "Namespace": "AWS/EC2",
+        "MetricName": "CPUUtilization",
+        "Dimensions": [
+          {
+            "Name": "InstanceId",
+            "Value": {
+              "Ref": "Backend"
+            }
+          }
+        ],
+        "Statistic": "Average",
+        "Period": 300,
+        "EvaluationPeriods": 1,
+        "Threshold": 70,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlertTopic"
+          }
+        ]
+      }
+    },
+    "Frontend": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": {
+          "Ref": "UbuntuAmi"
+        },
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "IamInstanceProfile": {
+          "Ref": "FrontendProfile"
+        },
+        "NetworkInterfaces": [
+          {
+            "DeviceIndex": "0",
+            "AssociatePublicIpAddress": true,
+            "SubnetId": {
+              "Ref": "FrontendSubnet"
+            },
+            "GroupSet": [
+              {
+                "Ref": "FrontendSecurityGroup"
+              }
+            ]
+          }
+        ],
+        "Monitoring": true,
+        "MetadataOptions": {
+          "HttpTokens": "required",
+          "HttpPutResponseHopLimit": 1
+        },
+        "CreditSpecification": {
+          "CPUCredits": "standard"
+        },
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "VolumeSize": 10,
+              "VolumeType": "gp3",
+              "Encrypted": true,
+              "DeleteOnTermination": true
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "ecomarket-ht01"
+          },
+          {
+            "Key": "Name",
+            "Value": "ecomarket-ht01-frontend"
+          }
+        ],
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Sub": "#!/bin/bash\nset -euo pipefail\nexport DEBIAN_FRONTEND=noninteractive\nmkdir -p /opt/ecomarket\napt-get update -qq\napt-get -o DPkg::Lock::Timeout=180 install -y python3-boto3 curl ca-certificates xz-utils nginx\npython3 - <<'PY'\nimport boto3\nboto3.client('s3',region_name='${AWS::Region}').download_file('${CatalogBucket}','${ArtifactPrefix}/frontend.tar.gz','/tmp/ecomarket.tar.gz')\nPY\nmkdir -p /var/www/ecomarket\ntar -xzf /tmp/ecomarket.tar.gz -C /var/www/ecomarket\ncat > /etc/nginx/conf.d/ecomarket-rate.conf <<'NGINX'\nlimit_req_zone $binary_remote_addr zone=ecocatalog:10m rate=10r/s;\nNGINX\ncat > /etc/nginx/sites-available/default <<'NGINX'\nserver {\n listen 80 default_server;\n server_name _;\n root /var/www/ecomarket;\n index index.html;\n add_header X-Content-Type-Options nosniff always;\n add_header X-Frame-Options DENY always;\n add_header Referrer-Policy strict-origin-when-cross-origin always;\n add_header Content-Security-Policy \"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'\" always;\n location /api/ {\n  limit_req zone=ecocatalog burst=20 nodelay;\n  proxy_pass http://${Backend.PrivateIp}:3000;\n  proxy_set_header Host $host;\n  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n  proxy_connect_timeout 5s;\n  proxy_read_timeout 20s;\n }\n location = /health { proxy_pass http://${Backend.PrivateIp}:3000/health; }\n location / { try_files $uri $uri/ /index.html; }\n}\nNGINX\nnginx -t\nsystemctl enable --now nginx\nsystemctl restart nginx\ncurl -fsSL --retry 3 https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb -o /tmp/cloudwatch-agent.deb\ndpkg -i /tmp/cloudwatch-agent.deb\ncat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'\n{\"metrics\":{\"namespace\":\"EcoMarket/HT01\",\"append_dimensions\":{\"InstanceId\":\"${!aws:InstanceId}\"},\"metrics_collected\":{\"mem\":{\"measurement\":[\"mem_used_percent\"],\"metrics_collection_interval\":60},\"disk\":{\"measurement\":[\"used_percent\"],\"resources\":[\"/\"],\"metrics_collection_interval\":60}}}}\nJSON\n/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json\n"
+          }
+        }
+      }
+    },
+    "FrontendCpuAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "EcoMarket CPU over 70 percent for 5 minutes",
+        "Namespace": "AWS/EC2",
+        "MetricName": "CPUUtilization",
+        "Dimensions": [
+          {
+            "Name": "InstanceId",
+            "Value": {
+              "Ref": "Frontend"
+            }
+          }
+        ],
+        "Statistic": "Average",
+        "Period": 300,
+        "EvaluationPeriods": 1,
+        "Threshold": 70,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlertTopic"
+          }
+        ]
+      }
+    },
+    "HTTPS": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Enabled": true,
+          "Comment": "EcoMarket frontend HTTPS; origin HTTP; no cache",
+          "PriceClass": "PriceClass_100",
+          "HttpVersion": "http2",
+          "Origins": [
+            {
+              "Id": "frontend",
+              "DomainName": {
+                "Fn::GetAtt": [
+                  "Frontend",
+                  "PublicDnsName"
+                ]
+              },
+              "CustomOriginConfig": {
+                "HTTPPort": 80,
+                "HTTPSPort": 443,
+                "OriginProtocolPolicy": "http-only"
+              }
+            }
+          ],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "frontend",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": [
+              "GET",
+              "HEAD",
+              "OPTIONS"
+            ],
+            "CachedMethods": [
+              "GET",
+              "HEAD"
+            ],
+            "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+            "OriginRequestPolicyId": {
+              "Ref": "OriginPolicy"
+            },
+            "Compress": true
+          },
+          "ViewerCertificate": {
+            "CloudFrontDefaultCertificate": true
+          }
+        }
+      }
+    },
+    "Dashboard": {
+      "Type": "AWS::CloudWatch::Dashboard",
+      "Properties": {
+        "DashboardName": "ecomarket-ht01-operacion",
+        "DashboardBody": {
+          "Fn::Sub": "{\"widgets\": [{\"type\": \"metric\", \"x\": 0, \"y\": 0, \"width\": 12, \"height\": 6, \"properties\": {\"title\": \"Frontend CPU\", \"region\": \"${AWS::Region}\", \"metrics\": [[\"AWS/EC2\", \"CPUUtilization\", \"InstanceId\", \"${Frontend}\"]], \"period\": 60, \"stat\": \"Average\"}}, {\"type\": \"metric\", \"x\": 0, \"y\": 6, \"width\": 12, \"height\": 6, \"properties\": {\"title\": \"Frontend Memoria\", \"region\": \"${AWS::Region}\", \"metrics\": [[\"EcoMarket/HT01\", \"mem_used_percent\", \"InstanceId\", \"${Frontend}\"]], \"period\": 60, \"stat\": \"Average\"}}, {\"type\": \"metric\", \"x\": 12, \"y\": 0, \"width\": 12, \"height\": 6, \"properties\": {\"title\": \"Backend CPU\", \"region\": \"${AWS::Region}\", \"metrics\": [[\"AWS/EC2\", \"CPUUtilization\", \"InstanceId\", \"${Backend}\"]], \"period\": 60, \"stat\": \"Average\"}}, {\"type\": \"metric\", \"x\": 12, \"y\": 6, \"width\": 12, \"height\": 6, \"properties\": {\"title\": \"Backend Memoria\", \"region\": \"${AWS::Region}\", \"metrics\": [[\"EcoMarket/HT01\", \"mem_used_percent\", \"InstanceId\", \"${Backend}\"]], \"period\": 60, \"stat\": \"Average\"}}]}"
+        }
+      }
+    },
+    "Peering": {
+      "Type": "AWS::EC2::VPCPeeringConnection",
+      "Properties": {
+        "VpcId": "vpc-0763b067ad756d7ba",
+        "PeerVpcId": "vpc-0f64569dde1fa939f",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "ecomarket-rds-educode"
+          }
+        ]
+      }
+    },
+    "DatabaseIngress": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": "sg-0324da0304d319886",
+        "SourceSecurityGroupId": {
+          "Ref": "BackendSG"
+        },
+        "IpProtocol": "tcp",
+        "FromPort": 3306,
+        "ToPort": 3306,
+        "Description": "HT01 EcoMarket backend to EduCode RDS"
+      },
+      "DependsOn": "Peering"
+    },
+    "CatalogSecret": {
+      "Type": "AWS::SecretsManager::Secret",
+      "Properties": {
+        "Name": "ecomarket/ht01/educode-catalog",
+        "GenerateSecretString": {
+          "SecretStringTemplate": "{\"username\": \"eco_ht01_catalog\"}",
+          "GenerateStringKey": "password",
+          "PasswordLength": 48,
+          "ExcludePunctuation": true
+        }
+      }
+    },
+    "EcoToDb0": {
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": "rtb-0a34983b212a3d387",
+        "DestinationCidrBlock": "10.0.5.0/24",
+        "VpcPeeringConnectionId": {
+          "Ref": "Peering"
+        }
+      }
+    },
+    "EcoToDb1": {
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": "rtb-0a34983b212a3d387",
+        "DestinationCidrBlock": "10.0.6.0/24",
+        "VpcPeeringConnectionId": {
+          "Ref": "Peering"
+        }
+      }
+    },
+    "DbToEco0": {
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": "rtb-04d6268a4f445222d",
+        "DestinationCidrBlock": {
+          "Fn::Sub": "${Backend.PrivateIp}/32"
+        },
+        "VpcPeeringConnectionId": {
+          "Ref": "Peering"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "FrontendId": {
+      "Value": {
+        "Ref": "Frontend"
+      }
+    },
+    "BackendId": {
+      "Value": {
+        "Ref": "Backend"
+      }
+    },
+    "URL": {
+      "Value": {
+        "Fn::Sub": "https://${HTTPS.DomainName}"
+      },
+      "Description": "Viewer HTTPS; CloudFront to EC2 uses HTTP"
+    },
+    "FrontendHTTP": {
+      "Value": {
+        "Fn::Sub": "http://${Frontend.PublicDnsName}"
+      }
+    },
+    "CatalogSecretArn": {
+      "Value": {
+        "Ref": "CatalogSecret"
+      }
+    },
+    "DatabaseEndpoint": {
+      "Value": "educode-ht04-db.cqrucw0qg3g4.us-east-1.rds.amazonaws.com"
+    },
+    "BackendInstanceId": {
+      "Value": {
+        "Ref": "Backend"
+      }
+    }
+  }
+}
