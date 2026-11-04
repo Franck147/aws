@@ -1,0 +1,74 @@
+[
+  {
+    "id": 1,
+    "name": "Caf\u00e9 de origen",
+    "category": "Despensa",
+    "description": "Caf\u00e9 peruano tostado, de aroma intenso y origen cercano.",
+    "price": 28.9,
+    "unit": "250 g",
+    "stock": 24,
+    "badge": "Origen peruano",
+    "tone": "coffee",
+    "image_key": "catalog/products/1.svg"
+  },
+  {
+    "id": 2,
+    "name": "Bolsa de algod\u00f3n",
+    "category": "Reutilizables",
+    "description": "Tu compa\u00f1era de compras, una y otra vez.",
+    "price": 18.0,
+    "unit": "1 unidad",
+    "stock": 30,
+    "badge": "Menos pl\u00e1stico",
+    "tone": "cotton",
+    "image_key": "catalog/products/2.svg"
+  },
+  {
+    "id": 3,
+    "name": "Miel de flores",
+    "category": "Despensa",
+    "description": "Dulzura natural en un frasco que puedes reutilizar.",
+    "price": 24.5,
+    "unit": "350 g",
+    "stock": 18,
+    "badge": "Envase reutilizable",
+    "tone": "honey",
+    "image_key": "catalog/products/3.svg"
+  },
+  {
+    "id": 4,
+    "name": "Jab\u00f3n vegetal",
+    "category": "Cuidado personal",
+    "description": "Una barra sencilla para una rutina m\u00e1s consciente.",
+    "price": 12.0,
+    "unit": "100 g",
+    "stock": 36,
+    "badge": "Sin envase pl\u00e1stico",
+    "tone": "soap",
+    "image_key": "catalog/products/4.svg"
+  },
+  {
+    "id": 5,
+    "name": "Botella de acero",
+    "category": "Reutilizables",
+    "description": "Lleva tu agua contigo y deja atr\u00e1s lo descartable.",
+    "price": 49.9,
+    "unit": "500 ml",
+    "stock": 15,
+    "badge": "Hecha para durar",
+    "tone": "bottle",
+    "image_key": "catalog/products/5.svg"
+  },
+  {
+    "id": 6,
+    "name": "Granola artesanal",
+    "category": "Despensa",
+    "description": "Avena, semillas y un buen comienzo para tu d\u00eda.",
+    "price": 22.0,
+    "unit": "300 g",
+    "stock": 20,
+    "badge": "Hecha en peque\u00f1os lotes",
+    "tone": "granola",
+    "image_key": "catalog/products/6.svg"
+  }
+]
